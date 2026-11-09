@@ -1,0 +1,31 @@
+{
+  "name": "harto",
+  "version": "1.0.0",
+  "description": "basic harness for topicos",
+  "type": "module",
+  "main": "src/index.ts",
+  "scripts": {
+    "start": "node --experimental-strip-types src/index.ts",
+    "test": "node --experimental-strip-types --test --test-reporter=spec \"src/**/*.test.ts\"",
+    "typecheck": "tsc --noEmit"
+  },
+  "engines": {
+    "node": ">=22"
+  },
+  "dependencies": {
+    "@anthropic-ai/sdk": "^1.5.0",
+    "@google/genai": "^1.30.0",
+    "@modelcontextprotocol/client": "^2.4.0",
+    "ink": "^8.0.0",
+    "openai": "^7.51.0",
+    "react": "^19.3.0",
+    "yoga-layout": "~3.2.1"
+  },
+  "author": "grupotopicos",
+  "license": "ISC",
+  "devDependencies": {
+    "@types/node": "^22.19.0",
+    "@types/react": "^19.3.0",
+    "typescript": "^5.9.0"
+  }
+}

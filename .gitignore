@@ -1,0 +1,5 @@
+node_modules/
+.harto/
+mcp.json
+.env
+*.log
