@@ -12,7 +12,7 @@ harto se escribe en TypeScript y corre en Node. El repo ya se llama `harto` y su
 
 ## D3 · Los SDK no se escapan de su archivo
 
-Anthropic, OpenAI, Gemini y el SDK de MCP se importan cada uno en un solo módulo. El resto del programa ve `Message`, `Tool` y `Response`. Es la prueba de que la abstracción es real. Viene de `how-to/en/add-a-provider.md` y de `AGENTS.md`.
+Anthropic, OpenAI, Gemini y el SDK de MCP se importan cada uno en un solo módulo. OpenRouter no añade un SDK: usa el cliente de Chat Completions que construye `openai.ts`, con otra URL y otra clave. El resto del programa ve `Message`, `Tool` y `Response`.
 
 ## D4 · Gemini es alcance de la primera versión, no un extra
 

@@ -98,6 +98,8 @@ export class TuiModel {
   private catalog: MentionItem[] | null = null;
   private mention: { start: number; query: string; items: MentionItem[]; selected: number } | null = null;
   private dismissed: { start: number; query: string } | null = null;
+  private partial = "";
+  private asker: ((line: string) => void) | null = null;
 
   constructor(options: TuiOptions = {}) {
     this.width = options.width ?? 80;
@@ -120,8 +122,40 @@ export class TuiModel {
   }
 
   append(line: string): void {
+    if (this.partial !== "") {
+      this.lines.push(this.partial);
+      this.partial = "";
+    }
     const parts = line.split("\n");
     for (const part of parts) this.lines.push(part);
+    this.changed();
+  }
+
+  /** Visible text while the model is still producing the current line. */
+  stream(delta: string): void {
+    this.partial += delta;
+    const parts = this.partial.split("\n");
+    this.partial = parts.pop() ?? "";
+    for (const part of parts) this.lines.push(part);
+    this.changed();
+  }
+
+  setProject(label: string): void {
+    this.project = label;
+    this.changed();
+  }
+
+  /** The next submitted line answers a slash command instead of starting a turn. */
+  ask(): Promise<string> {
+    return new Promise((resolve) => {
+      this.asker = resolve;
+    });
+  }
+
+  private resolveAsk(line: string): void {
+    const resolve = this.asker;
+    this.asker = null;
+    resolve?.(line);
     this.changed();
   }
 
@@ -227,6 +261,10 @@ export class TuiModel {
   }
 
   handle(key: Key): TuiAction {
+    if (this.asker && (key.kind === "esc" || key.kind === "ctrlc")) {
+      this.resolveAsk("");
+      return { type: "none" };
+    }
     if (this.phase === "approval") return this.handleApproval(key);
     if (this.phase !== "idle" || this.debugFocus) this.mention = null;
     else this.syncMention();
@@ -259,7 +297,7 @@ export class TuiModel {
       this.page(this.slots().scroll);
       return { type: "none" };
     }
-    if (this.phase !== "idle") return { type: "none" };
+    if (this.phase !== "idle" && !this.asker) return { type: "none" };
     if (this.mention && (key.kind === "up" || key.kind === "down")) {
       const last = this.mention.items.length - 1;
       if (last >= 0 && key.kind === "up") this.mention.selected = Math.max(0, this.mention.selected - 1);
@@ -267,6 +305,15 @@ export class TuiModel {
       return { type: "none" };
     }
     if (key.kind === "enter") {
+      if (this.asker) {
+        const line = this.input.trim();
+        this.input = "";
+        this.cursor = 0;
+        this.lines.push(`❯ ${line}`);
+        this.follow = true;
+        this.resolveAsk(line);
+        return { type: "none" };
+      }
       if (this.mention) return this.acceptMention();
       const line = this.input.trim();
       if (line === "") return { type: "none" };
@@ -431,8 +478,9 @@ export class TuiModel {
   }
 
   private window(rows: number): string[] {
-    if (this.follow) this.anchor = Math.max(0, this.lines.length - rows);
-    const slice = this.lines.slice(this.anchor, this.anchor + rows);
+    const source = this.partial === "" ? this.lines : this.lines.concat(this.partial);
+    if (this.follow) this.anchor = Math.max(0, source.length - rows);
+    const slice = source.slice(this.anchor, this.anchor + rows);
     while (slice.length < rows) slice.push("");
     return slice;
   }
@@ -448,7 +496,7 @@ export class TuiModel {
   }
 
   private syncMention(): void {
-    if (this.phase !== "idle" || this.debugFocus) {
+    if (this.phase !== "idle" || this.debugFocus || this.asker) {
       this.mention = null;
       return;
     }

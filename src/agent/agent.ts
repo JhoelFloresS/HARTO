@@ -7,8 +7,10 @@ import {
 import { NoCompaction, type CompactionStrategy } from "../compact/strategy.ts";
 import { recordfc, recordp, recordpc, type Level } from "../debug/debug.ts";
 import { consoleSink, type LineSink } from "../output.ts";
+import type { PermissionPolicy } from "../permission/policy.ts";
 import type { Provider, SendContext } from "../provider/provider.ts";
 import type { Registry } from "../tool/registry.ts";
+import { previewEdit } from "../tool/edit.ts";
 import { buildWriteDiff, extractWritePath } from "./diff.ts";
 
 export class MaxTurnsError extends Error {
@@ -37,9 +39,14 @@ export class Agent {
   quiet = false;
   /** Null auto-approves. Subagents leave this null so they don't block on the UI. */
   confirm: ((prompt: string, detail: string) => boolean | Promise<boolean>) | null = null;
+  /** Null asks whenever confirm is set. The root installs an AllowList. */
+  policy: PermissionPolicy | null = null;
+  /** Live text. Set by the UI. Thought blocks never come through here. */
+  onDelta: ((delta: string) => void) | null = null;
   write: LineSink;
 
   private messages: Message[] = [];
+  private pendingLine = false;
 
   constructor(provider: Provider, system: string, tools: Registry, write: LineSink = consoleSink) {
     this.provider = provider;
@@ -98,10 +105,17 @@ export class Agent {
       }
 
       let response;
+      let streamed = false;
       try {
         response = await this.provider.send(this.messages, this.tools.definitions(), {
           signal: ctx.signal,
           system: this.system,
+          onText: this.quiet
+            ? undefined
+            : (delta) => {
+                streamed = true;
+                this.feed(delta);
+              },
         });
       } catch (err) {
         if (err instanceof Error) {
@@ -119,7 +133,7 @@ export class Agent {
         if (block.type === "text") {
           if (!block.text) continue;
           if (isThoughtBlock(block)) continue;
-          if (!this.quiet) this.write(block.text);
+          if (!this.quiet && !streamed) this.write(block.text);
           finalText += `${block.text}\n`;
           continue;
         }
@@ -136,6 +150,7 @@ export class Agent {
       }
 
       if (response.stopReason !== "tool_use" || !hasToolCall) {
+        this.breakStream();
         return finalText.trim();
       }
 
@@ -150,9 +165,17 @@ export class Agent {
     rawInput: string,
     ctx: SendContext,
   ): Promise<{ result: string; isError: boolean }> {
+    this.breakStream();
     this.write(`${this.logPrefix}[tool] ${name} ${rawInput}`);
     const source = this.name === "" ? "tool" : `tool/${this.name}`;
     const reqId = recordp(source, "info", `→ ${name} ${truncate(rawInput, 200)}`, rawInput);
+
+    const decision = this.policy ? this.policy.decide(name, rawInput) : { decision: "ask" as const, reason: "" };
+    if (decision.decision === "deny") {
+      const reason = decision.reason === "" ? "permission policy denied this tool call" : decision.reason;
+      recordfc(reqId, source, "warn", "denied: %s", name);
+      return { result: reason, isError: true };
+    }
 
     let prompt = "approve?";
     let detail = "";
@@ -163,9 +186,20 @@ export class Agent {
         const path = extractWritePath(rawInput);
         prompt = path === "" ? "approve write?" : `approve write to ${path}?`;
       }
+    } else if (name === "edit") {
+      const preview = previewEdit(rawInput);
+      if ("error" in preview) {
+        recordpc(reqId, source, "error", `← ${name} error: ${truncate(preview.error, 200)}`, preview.error);
+        return { result: preview.error, isError: true };
+      }
+      detail = buildWriteDiff(JSON.stringify({ path: preview.path, content: preview.after }));
+      prompt = `approve edit to ${preview.path}?`;
+    } else if (name === "cmd") {
+      prompt = "approve command?";
+      detail = commandText(rawInput);
     }
 
-    if (this.confirm && !(await this.confirm(prompt, detail))) {
+    if (decision.decision === "ask" && this.confirm && !(await this.confirm(prompt, detail))) {
       recordfc(reqId, source, "warn", "denied: %s", name);
       return { result: "user denied this tool call", isError: true };
     }
@@ -183,6 +217,18 @@ export class Agent {
     return { result, isError };
   }
 
+  private feed(delta: string): void {
+    if (delta === "") return;
+    this.pendingLine = !delta.endsWith("\n");
+    this.onDelta?.(delta);
+  }
+
+  private breakStream(): void {
+    if (!this.pendingLine) return;
+    this.onDelta?.("\n");
+    this.pendingLine = false;
+  }
+
   private compactorName(): string {
     return this.compactor.constructor?.name || "none";
   }
@@ -191,4 +237,14 @@ export class Agent {
 function truncate(value: string, max: number): string {
   if (value.length <= max) return value;
   return `${value.slice(0, max)}…`;
+}
+
+function commandText(raw: string): string {
+  try {
+    const parsed = JSON.parse(raw) as { command?: unknown };
+    if (typeof parsed.command === "string") return parsed.command;
+  } catch {
+    // The modal still shows the raw input.
+  }
+  return raw;
 }

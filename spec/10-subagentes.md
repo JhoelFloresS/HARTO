@@ -30,7 +30,7 @@ class SubagentRegistry {
 Único subagente de partida.
 
 - Nombre: `research`.
-- Tools: solo `read_file`.
+- Tools: `read_file` y `search`. No escribe ni abre un shell.
 - `maxTurns`: 10.
 - `quiet`: true. El comentario interno no se imprime en el scrollback de la raíz; el texto final vuelve como resultado del tool.
 - `logPrefix`: `"  ↳ "`.

@@ -9,7 +9,7 @@ Registro: mapa nombre → `{ description, usage?, run(args) }`. Se llena en un m
 | Comando | Uso | Efecto |
 |---|---|---|
 | `/help` | | Lista ordenada. Si hay `usage`, se muestra eso en lugar de `/nombre` |
-| `/provider` | `/provider [anthropic\|openai\|gemini] [model]` | Sin args: actual, lista, una línea de uso. Con args: cambia provider y, si viene el segundo token, el modelo. Avisa si la API key de ese provider no está en el entorno |
+| `/provider` | `/provider [anthropic\|openai\|gemini\|openrouter] [model]` | Sin args: actual, lista, una línea de uso. Con args: cambia provider y, si viene el segundo token, el modelo. Avisa si la API key de ese provider no está en el entorno |
 | `/model` | `/model [name]` | Sin args: modelo actual, provider entre paréntesis, sugerencias de la tabla de ese provider, y la nota de que cualquier id se valida en la próxima llamada. Con args: `setModel` |
 | `/clear` | | Vacía el historial del agente raíz |
 | `/tools` | | Nombre y descripción. Las que son `MCPTool` llevan `(mcp)` |
@@ -19,6 +19,8 @@ Registro: mapa nombre → `{ description, usage?, run(args) }`. Se llena en un m
 | `/tokens` | | Si el provider no es `TokenReporter`, una línea diciendo que no informa uso. Si lo es: input, output, y cache write/read solo cuando alguno es > 0. Costo con 4 decimales, o `(unknown model — no rate)` si es -1 |
 | `/debug` | `/debug [on\|off\|clear\|ls\|show [id]]` | Ver abajo |
 | `/exit` | | Termina el proceso. El `close` de memoria tiene que correr igual (hook de salida, no solo el return del main) |
+| `/open-project` | `/open-project [ruta]` | Cambia el cwd del proceso a esa carpeta. Sin ruta, pregunta `Ruta del proyecto a abrir, o vacío para cancelar:`. Vacío cancela. Si no es un directorio, no se mueve. Al entrar: detecta el proyecto, recarga `AGENTS.md`, `.env` (sin pisar variables ya puestas), la memoria `.harto/` y los MCP de esa carpeta. La línea de estado pasa a mostrar la carpeta nueva |
+| `/mcp` | `/mcp [add]` | Sin args: lista los servidores de `mcp.json` con transporte y estado (`conectado`, `falló`, `conectando`, `configurado`). `/mcp add` pregunta nombre, transporte (`stdio` o `http`) y, según el caso, comando y args o URL. Agrega el servidor al archivo y reconecta. Los headers se editan a mano en `mcp.json` |
 
 `/tokens` formatea miles con comas.
 

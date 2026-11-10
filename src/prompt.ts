@@ -12,6 +12,7 @@ Tools:
 - For read-only investigation ("where is X", "how does Y work"), prefer delegate_research over reading many files into this conversation. Pass a concrete task, then present the findings.
 - remember, sparingly, for conventions, preferences, and decisions that should outlive this session.
 - recall searches older sessions. Recent sessions are already in the system prompt; look there first. A path it returns can be opened with read_file.
+- search finds text in the project. edit changes one unique snippet. write_file creates or rewrites a whole file.
 - A user message may include <file path="..."> or <folder path="..."> blocks for paths they referenced with @. That content is already attached.`;
 
 /** Missing file is silence. Any other read error is silence too: the session still starts. */

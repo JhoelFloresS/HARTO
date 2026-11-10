@@ -12,7 +12,7 @@ El proyecto de referencia se presenta como material de aprendizaje (~1 000 líne
 
 Paridad con el comportamiento real del repo Go (no con el README viejo), más Gemini:
 
-- Conversar con Anthropic, OpenAI o Gemini, y cambiar de proveedor o de modelo en la misma sesión (`/provider`, `/model`, o `LLM_PROVIDER` / `LLM_MODEL` al arrancar).
+- Conversar con Anthropic, OpenAI, Gemini u OpenRouter, y cambiar de proveedor o de modelo en la misma sesión (`/provider`, `/model`, o `LLM_PROVIDER` / `LLM_MODEL` al arrancar).
 - Llamar tools locales: `cmd`, `read_file`, `write_file`, `remember`, `recall`.
 - Pedir aprobación antes de cada tool. En `write_file`, mostrar un diff unificado antes de tocar el disco.
 - Compactar el historial con estrategias intercambiables (nada, ventana, resumen, más un decorador que deja log).
@@ -35,7 +35,7 @@ Estas divergencias están cerradas en [16-decisiones](16-decisiones.md). El plan
 | Salida hacia la UI | Secuestra `os.Stdout` con un pipe | Un sink inyectado. No se parchea `console` |
 | Shell | Tool `bash`, siempre `sh -c` | Tool `cmd`, siempre `cmd.exe /d /s /c`. Sin Bash y sin PowerShell |
 | Directorio de memoria | `.harness/` | `.harto/`, para no chocar si ambos corren en el mismo repo |
-| Proveedores | `anthropic`, `openai` | Esos dos, más `gemini` |
+| Proveedores | `anthropic`, `openai` | Esos dos, más `gemini` y `openrouter` |
 | Metadatos opacos del proveedor | No hacen falta | Campo `providerMeta` en `Block`, obligatorio para las *thought signatures* de Gemini |
 | System prompt | Habla del repo Go y de `follow_along/` | Habla de harto, de `spec/` y del código bajo `src/`. Sigue la regla de contestar en el idioma del usuario |
 
@@ -43,8 +43,7 @@ Estas divergencias están cerradas en [16-decisiones](16-decisiones.md). El plan
 
 No forman parte del contrato actual. Están inventariados en [15-mejoras-futuras](15-mejoras-futuras.md) para no perderlos:
 
-- Streaming de tokens.
-- Políticas de permiso más ricas que "preguntar siempre" (`AlwaysAllow`, `AllowList`, `AskOnce`, `PathScoped`). El original tampoco las tiene implementadas; solo las describe `how-to`.
+- Políticas de permiso además de la `AllowList` de la raíz (`AskOnce`, `PathScoped`, `AlwaysAllow`). La interfaz y la lista blanca de lecturas ya están.
 - Caché de prompt activa. El capítulo 17 la explica, pero el código Go no envía `cache_control`.
 - Entrada multilínea, imágenes, subagentes definidos en Markdown, reintento estructurado de tools, backends de memoria alternativos, sandbox.
 - Persistencia de la conversación en curso (`/save`, `/load`). La memoria de sesiones no es eso: guarda un resumen, no el transcript completo reanudable.

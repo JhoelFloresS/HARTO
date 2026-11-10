@@ -2,7 +2,9 @@
 
 ## Comportamiento normativo de esta versión
 
-Cada tool call del agente que tenga `confirm` pasa por el usuario antes de ejecutarse. No hay lista blanca. Los subagentes se construyen con `confirm = null` y no preguntan: research solo tiene `read_file`, así que no escribe ni abre un shell.
+El agente raíz usa una `AllowList`: `read_file`, `recall` y `search` se ejecutan sin preguntar. El resto (`write_file`, `edit`, `cmd`, `remember`, y cualquier tool MCP) devuelve `ask` y pasa por `confirm`. Una política `null` sigue preguntando siempre, que es lo que hacen los tests que no instalan política.
+
+`decide` corre antes del diff y antes de `confirm`. `deny` no pregunta: el tool result es `reason`, o `permission policy denied this tool call` si `reason` viene vacío. `allow` ejecuta. `ask` arma el prompt (el diff de `write_file` y de `edit`, el comando de `cmd`) y llama a `confirm` si existe. `confirm` null no pregunta: así research, que no tiene política ni `confirm`, sigue sin bloquear la UI. Un `edit` cuyo `old` no aparece una sola vez falla sin abrir el modal.
 
 La negación no aborta el turno. Vuelve al modelo como tool result de error, texto fijo:
 
@@ -30,11 +32,9 @@ El input de chat no procesa teclas mientras el modal está abierto.
 
 El contenido del modal para `write_file` es el string definido en [04-bucle-del-agente](04-bucle-del-agente.md). Se resalta como diff si el UI tiene highlighter; si no, se muestra en crudo. Un detail vacío usa el prompt corto `approve?` sin modal de cuerpo.
 
-## Lo que este spec no implementa
+## Política
 
-`how-to/en/add-a-permission-policy.md` describe una interfaz que el repo Go **no tiene**. harto la deja escrita para no rediseñarla después, y la marca como trabajo futuro. Hasta que se haga, `confirm` se llama siempre.
-
-### Interfaz objetivo (no construir todavía)
+`how-to/en/add-a-permission-policy.md` describe una interfaz que el repo Go no tiene. harto la construye en `src/permission/policy.ts`.
 
 ```ts
 type Decision = "ask" | "allow" | "deny";
@@ -53,15 +53,15 @@ Políticas que el how-to ya bosqueja y que una versión posterior puede añadir 
 
 | Política | Comportamiento |
 |---|---|
-| `AlwaysAsk` | Siempre `ask`. Es el default el día que exista la interfaz |
+| `AlwaysAsk` | Siempre `ask`. No es el default de la raíz |
 | `AlwaysAllow` | Siempre `allow` |
-| `AllowList` | `allow` si el nombre está en el conjunto; si no, `ask` |
+| `AllowList` | `allow` si el nombre está en el conjunto; si no, `ask`. Es la política de la raíz, con `read_file`, `recall` y `search` |
 | `AskOnce` | La primera vez `ask`; si el usuario dice que sí, las siguientes del mismo nombre son `allow`. Necesita un hook después del confirm, porque `decide` no puede esperar la respuesta. Estado con exclusión mutua: los subagentes comparten la política |
 | `PathScoped` | Para `read_file` y `write_file`, niega paths que se salgan del cwd tras resolver `..` y symlinks. El resto lo delega a una política interna |
 
 `decide` no pregunta, no llama al modelo y no hace red. Si hace falta un humano, devuelve `ask`.
 
-Los subagentes no heredan automáticamente la política interactiva de la raíz. Research sigue sin preguntar. El día que una política exista, se elige en el registro del subagente, no se asume.
+Los subagentes no heredan la política de la raíz. Research se construye sin política y con `confirm` null.
 
 ## Amenaza que el diseño acepta
 

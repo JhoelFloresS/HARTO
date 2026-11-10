@@ -2,6 +2,7 @@ import type { Agent } from "./agent/agent.ts";
 import { NoCompaction } from "./compact/strategy.ts";
 import { SlidingWindow } from "./compact/sliding.ts";
 import { Summarize } from "./compact/summarize.ts";
+import type { ServerConfig } from "./mcp/config.ts";
 import { clearDebug, debugEnabled, findById, latest, setDebugEnabled, snapshot } from "./debug/debug.ts";
 import type { LineSink } from "./output.ts";
 import { apiKeyEnv, createProvider, isProviderName, knownModels, knownProviders } from "./provider/select.ts";
@@ -15,6 +16,12 @@ export interface CommandContext {
   providerName: string;
   write: LineSink;
   requestExit(): void | Promise<void>;
+  /** Next line the user submits. Commands that need a path use this. */
+  ask?(): Promise<string>;
+  /** Move the process into another project directory. Returns the label shown in the status line. */
+  relocate?(path: string): Promise<string>;
+  listMcp?(): Promise<string>;
+  addMcp?(server: ServerConfig): Promise<void>;
 }
 
 interface Command {
@@ -25,7 +32,7 @@ interface Command {
 
 const commands = new Map<string, Command>([
   ["help", { description: "show available commands", run: cmdHelp }],
-  ["provider", { description: "show or change the LLM provider", usage: "/provider [anthropic|openai|gemini]", run: cmdProvider }],
+  ["provider", { description: "show or change the LLM provider", usage: "/provider [anthropic|openai|gemini|openrouter]", run: cmdProvider }],
   ["model", { description: "show or change the model", usage: "/model [name]", run: cmdModel }],
   ["clear", { description: "clear conversation history", run: cmdClear }],
   ["tools", { description: "list available tools", run: cmdTools }],
@@ -49,6 +56,8 @@ const commands = new Map<string, Command>([
     },
   ],
   ["exit", { description: "exit the harness", run: cmdExit }],
+  ["open-project", { description: "open another project folder", usage: "/open-project [path]", run: cmdOpenProject }],
+  ["mcp", { description: "list MCP servers or add one", usage: "/mcp [add]", run: cmdMcp }],
 ]);
 
 /** True when the line was a slash command, including an unknown one. */
@@ -72,7 +81,7 @@ function cmdHelp(_args: string, ctx: CommandContext): void {
   for (const name of [...commands.keys()].sort()) {
     const command = commands.get(name)!;
     const display = command.usage ?? `/${name}`;
-    ctx.write(`  ${display.padEnd(22)} ${command.description}`);
+    ctx.write(`  ${display.padEnd(28)} ${command.description}`);
   }
 }
 
@@ -303,6 +312,88 @@ function findShown(idText: string, ctx: CommandContext) {
 
 function cmdExit(_args: string, ctx: CommandContext): Promise<void> | void {
   return ctx.requestExit();
+}
+
+async function cmdOpenProject(args: string, ctx: CommandContext): Promise<void> {
+  if (!ctx.relocate) {
+    ctx.write("open-project is not available");
+    return;
+  }
+  let path = args.trim();
+  if (path === "") {
+    if (!ctx.ask) {
+      ctx.write("usage: /open-project <path>");
+      return;
+    }
+    ctx.write("Ruta del proyecto a abrir, o vacío para cancelar:");
+    path = (await ctx.ask()).trim();
+  }
+  if (path === "") {
+    ctx.write("cancelado");
+    return;
+  }
+  try {
+    const label = await ctx.relocate(path);
+    ctx.write(`proyecto: ${label}`);
+  } catch (err) {
+    const message = err instanceof Error ? err.message : String(err);
+    ctx.write(message);
+  }
+}
+
+async function cmdMcp(args: string, ctx: CommandContext): Promise<void> {
+  const verb = args.trim();
+  if (verb === "" || verb === "ls") {
+    if (!ctx.listMcp) {
+      ctx.write("mcp is not available");
+      return;
+    }
+    ctx.write(await ctx.listMcp());
+    return;
+  }
+  if (verb !== "add") {
+    ctx.write("usage: /mcp [add]");
+    return;
+  }
+  if (!ctx.ask || !ctx.addMcp) {
+    ctx.write("mcp add is not available");
+    return;
+  }
+  const name = await askLine(ctx, "Nombre del servidor MCP:");
+  if (!name) return;
+  const transport = (await askLine(ctx, "Transporte (stdio o http):"))?.toLowerCase();
+  if (!transport) return;
+  if (transport !== "stdio" && transport !== "http") {
+    ctx.write("transporte desconocido: usa stdio o http");
+    return;
+  }
+  if (transport === "stdio") {
+    const command = await askLine(ctx, "Comando:");
+    if (!command) return;
+    ctx.write("Args separados por espacio, o vacío:");
+    const argsLine = (await ctx.ask!()).trim();
+    await ctx.addMcp({
+      name,
+      transport,
+      command,
+      args: argsLine === "" ? [] : argsLine.split(/\s+/),
+    });
+  } else {
+    const url = await askLine(ctx, "URL:");
+    if (!url) return;
+    await ctx.addMcp({ name, transport, url });
+  }
+  ctx.write(`mcp: ${name} agregado`);
+}
+
+async function askLine(ctx: CommandContext, prompt: string): Promise<string | null> {
+  ctx.write(prompt);
+  const value = (await ctx.ask!()).trim();
+  if (value === "") {
+    ctx.write("cancelado");
+    return null;
+  }
+  return value;
 }
 
 function asTokenReporter(provider: unknown): TokenReporter | null {

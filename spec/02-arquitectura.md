@@ -26,7 +26,8 @@ src/
     provider.ts       interfaz Provider
     payloads.ts       JSON de depuración de request/response
     anthropic.ts      único import del SDK de Anthropic
-    openai.ts         único import del SDK de OpenAI
+    openai.ts         único import del SDK de OpenAI. OpenRouter reutiliza ese cliente
+    openrouter.ts     Chat Completions contra openrouter.ai
     gemini.ts         único import del SDK de Gemini
     mock.ts           respuestas enlatadas para tests
   tool/
@@ -159,11 +160,11 @@ No se copia el prompt del repo Go: ese texto habla de `follow_along/` y de un pr
 | `AGENTS.md` en el cwd | no | Se añade al system prompt bajo un encabezado fijo |
 | `mcp.json` en el cwd | no | Lista de servidores MCP. Puede contener secretos; no se commitea. Plantilla: `mcp.example.json` |
 | `.harto/` | lo crea el proceso | `sessions/*.md` + `index.json`. No se commitea |
-| `LLM_PROVIDER` | no | `anthropic` (default), `openai`, `gemini` |
+| `LLM_PROVIDER` | no | `anthropic` (default), `openai`, `gemini`, `openrouter` |
 | `LLM_MODEL` | no | Vacío = default de ese provider |
 | `HARNESS_DEBUG` | no | `1` / `true` / `yes` / `on` arranca con el panel de debug grabando |
 | `HARTO_REPL` | no | `1` fuerza el REPL del nivel A aunque stdin sea un TTY |
-| `ANTHROPIC_API_KEY`, `OPENAI_API_KEY`, `GEMINI_API_KEY` | según el provider activo | Las lee el SDK o el adaptador. harto no las parsea para mandarlas; solo avisa en `/provider` si la variable esperada está vacía |
+| `ANTHROPIC_API_KEY`, `OPENAI_API_KEY`, `GEMINI_API_KEY`, `OPENROUTER_API_KEY` | según el provider activo | Las lee el SDK o el adaptador. harto no las parsea para mandarlas; solo avisa en `/provider` si la variable esperada está vacía |
 | `.env` en el cwd | no | Lo lee el arranque, antes de mirar `LLM_PROVIDER` y las API keys. Acepta `CLAVE=valor`, `set CLAVE=valor` y `export CLAVE=valor`. Una variable que ya está en el entorno no se pisa. No se commitea |
 
 Los comandos y la UI están especificados en [13-comandos-debug-ui](13-comandos-debug-ui.md).

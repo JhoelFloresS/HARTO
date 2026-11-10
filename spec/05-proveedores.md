@@ -25,7 +25,7 @@ interface TokenReporter {
 
 Subagentes que comparten el mismo objeto provider suman en el mismo acumulador. Un cambio de provider con `/provider` crea un objeto nuevo y el total vuelve a cero.
 
-## Reglas comunes a los tres adaptadores reales
+## Reglas comunes a los adaptadores reales
 
 - El archivo del adaptador es el único que importa el SDK de ese vendor.
 - `send` traduce `Message[]` → request nativo y la respuesta nativa → `Response`. Esas dos funciones son privadas.
@@ -94,6 +94,18 @@ Referencia: `internal/provider/openai.go`. Chat Completions, no la Responses API
   | gpt-5 / gpt-5-codex | 1.25 | 10 | 0.125 |
   | gpt-5-mini | 0.25 | 2 | 0.025 |
 
+## OpenRouter
+
+Pasarela. El mismo contrato de Chat Completions que OpenAI, contra `https://openrouter.ai/api/v1`. No tiene SDK propio: `openai.ts` sigue siendo el único import del paquete `openai`, y `openrouter.ts` le pide un cliente con otra base y otra clave.
+
+- Clave en `OPENROUTER_API_KEY`.
+- El id de modelo es el slug de OpenRouter, `proveedor/modelo`. Cualquier string se acepta y se valida en la próxima llamada.
+- Modelo por defecto: `openai/gpt-5-mini`.
+- Sugerencias de `/model`: `openai/gpt-5-mini`, `openai/gpt-5`, `anthropic/claude-sonnet-4.6`, `anthropic/claude-haiku-4.5`, `google/gemini-3.5-flash-lite`.
+- La traducción de mensajes, tools y streaming es la de OpenAI. `stop` y `tool_calls` se mapean igual.
+- No hay tabla de precios. OpenRouter cobra la tarifa del modelo de turno, y cambia seguido. El costo estimado es `-1` para cualquier id. `/tokens` sigue mostrando los tokens.
+- Header `X-Title: harto` en cada cliente, para que el panel de OpenRouter nombre la app.
+
 ## Mock
 
 Referencia: `internal/provider/mock.go`. Obligatorio desde el primer corte del loop, porque es lo que hace testeable el resto.
@@ -112,7 +124,7 @@ Referencia: `internal/provider/mock.go`. Obligatorio desde el primer corte del l
 ## Selección
 
 ```ts
-type ProviderName = "anthropic" | "openai" | "gemini";
+type ProviderName = "anthropic" | "openai" | "gemini" | "openrouter";
 ```
 
 `newProvider(name, model, system)`:
@@ -122,6 +134,7 @@ type ProviderName = "anthropic" | "openai" | "gemini";
 | `anthropic` | default Anthropic | `ANTHROPIC_API_KEY` |
 | `openai` | `gpt-5` | `OPENAI_API_KEY` |
 | `gemini` | ver [06-gemini](06-gemini.md) | `GEMINI_API_KEY` |
+| `openrouter` | `openai/gpt-5-mini` | `OPENROUTER_API_KEY` |
 | otro | error con la lista de nombres | — |
 
 Arranque: `LLM_PROVIDER` o `anthropic`. Si esa construcción falla, stderr y Anthropic.

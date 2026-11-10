@@ -55,7 +55,25 @@ Nombre `read_file`. Input `{ path: string }`. Lee el archivo como texto UTF-8. E
 
 Nombre `write_file`. Input `{ path, content }`, ambos requeridos. Crea o pisa el archivo. Modo equivalente a `0644` donde el SO lo permita; en Windows se usa el default del runtime. Éxito: `wrote <n> bytes to <path>`.
 
-Esta tool no muestra el diff. El diff lo calcula el agente **antes** de llamarla, y solo llega aquí si `confirm` devolvió true. No escribir el archivo dentro del cálculo del diff.
+Esta tool no muestra el diff. El diff lo calcula el agente **antes** de llamarla, y solo llega aquí si la política dejó pasar la llamada y `confirm` devolvió true. No escribir el archivo dentro del cálculo del diff.
+
+## `search`
+
+Nombre `search`. Busca texto en el proyecto, o lista caminos si no hay texto.
+
+Input: `query` (string, puede ir vacío), `path` opcional (directorio; default el cwd), `glob` opcional (`*` y `?`, contra el camino relativo).
+
+- La búsqueda es literal y no distingue mayúsculas. Un `query` vacío con `glob` lista caminos. Sin query y sin glob, error.
+- `path` se resuelve contra el cwd. Si el realpath sale del proyecto, `isError` y el texto dice que está afuera. No se sigue un symlink. `*` en el glob puede cruzar carpetas, así `*.ts` encuentra `src/a.ts`.
+- No entra en `node_modules`, `.git`, `dist`, `build`, `coverage`, `.harto` ni en directorios ocultos.
+- Como mucho 80 coincidencias y 5000 archivos. Cada hit es `camino:línea: texto`. La salida pasa por el tope de 100 KiB.
+- Un archivo con un byte NUL en los primeros 8 KiB se salta.
+
+## `edit`
+
+Nombre `edit`. Reemplaza un trozo único de un archivo. `write_file` queda para crear o reescribir el archivo entero.
+
+Input: `path`, `old` y `new`, los tres string requeridos. `old` no puede ser vacío y tiene que aparecer una sola vez en el archivo. Cero veces, o más de una, es `isError` y no se escribe: el mensaje le pide al modelo más contexto. El agente calcula el diff unificado del resultado y, como la política de la raíz pide `ask`, lo muestra antes de escribir.
 
 ## `remember` y `recall`
 

@@ -4,6 +4,8 @@ export interface SendContext {
   signal?: AbortSignal;
   /** This call's system prompt. Absent means the system the provider was built with. */
   system?: string;
+  /** Visible text as it arrives. Thoughts are not delivered. Absent keeps the full reply until send returns. */
+  onText?: (delta: string) => void;
 }
 
 export interface Provider {

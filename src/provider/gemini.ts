@@ -72,6 +72,7 @@ export interface GeminiResult {
 
 export interface GeminiClient {
   generateContent(request: GeminiRequest): Promise<GeminiResult>;
+  stream?(request: GeminiRequest, onText: (delta: string) => void): Promise<GeminiResult>;
 }
 
 type GoogleGenAICtor = new (options: { apiKey?: string }) => {
@@ -144,7 +145,60 @@ async function createSdkClient(): Promise<GeminiClient> {
         usage: response.usageMetadata,
       };
     },
+    async stream(request, onText) {
+      const live = ai as unknown as {
+        models: {
+          generateContentStream(params: Record<string, unknown>): Promise<AsyncIterable<GeminiStreamChunk>> | AsyncIterable<GeminiStreamChunk>;
+        };
+      };
+      const events = await Promise.resolve(
+        live.models.generateContentStream({
+          model: request.model,
+          contents: request.contents,
+          config: {
+            ...(request.systemInstruction ? { systemInstruction: request.systemInstruction } : {}),
+            maxOutputTokens: request.maxOutputTokens,
+            abortSignal: request.signal,
+            ...(request.functionDeclarations && request.functionDeclarations.length > 0
+              ? {
+                  tools: [
+                    {
+                      functionDeclarations: request.functionDeclarations.map((fn) => ({
+                        name: fn.name,
+                        description: fn.description,
+                        parametersJsonSchema: fn.parameters,
+                      })),
+                    },
+                  ],
+                }
+              : {}),
+          },
+        }),
+      );
+      return collectGemini(events, onText);
+    },
   };
+}
+
+interface GeminiStreamChunk {
+  candidates?: Array<{ finishReason?: string; content?: { parts?: GeminiPart[] } }>;
+  usageMetadata?: GeminiUsage;
+}
+
+async function collectGemini(events: AsyncIterable<GeminiStreamChunk>, onText: (delta: string) => void): Promise<GeminiResult> {
+  const parts: GeminiPart[] = [];
+  let finishReason: string | undefined;
+  let usage: GeminiUsage | undefined;
+  for await (const chunk of events) {
+    const candidate = chunk.candidates?.[0];
+    for (const part of candidate?.content?.parts ?? []) {
+      if (part.text && !part.thought) onText(part.text);
+      parts.push(part);
+    }
+    if (candidate?.finishReason) finishReason = candidate.finishReason;
+    if (chunk.usageMetadata) usage = chunk.usageMetadata;
+  }
+  return { parts, finishReason, usage };
 }
 
 export class GeminiProvider implements Provider, TokenReporter {
@@ -202,7 +256,7 @@ export class GeminiProvider implements Provider, TokenReporter {
     const start = Date.now();
     try {
       const client = this.client ?? (await this.sdk());
-      const raw = await client.generateContent(request);
+      const raw = ctx.onText && client.stream ? await client.stream(request, ctx.onText) : await client.generateContent(request);
       const response = fromResult(raw);
       this.total = addUsage(this.total, response.usage);
       const elapsed = Date.now() - start;
