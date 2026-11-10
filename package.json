@@ -6,7 +6,7 @@
   "main": "src/index.ts",
   "scripts": {
     "start": "node --experimental-strip-types src/index.ts",
-    "test": "node --experimental-strip-types --test --test-reporter=spec \"src/**/*.test.ts\"",
+    "test": "node --experimental-strip-types --test --test-reporter=spec \"tests/**/*.test.ts\"",
     "typecheck": "tsc --noEmit"
   },
   "engines": {
