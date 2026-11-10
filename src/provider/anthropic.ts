@@ -67,6 +67,7 @@ export interface AnthropicResult {
 
 export interface AnthropicClient {
   create(request: AnthropicRequest): Promise<AnthropicResult>;
+  stream?(request: AnthropicRequest, onText: (delta: string) => void): Promise<AnthropicResult>;
 }
 
 interface AnthropicMeta {
@@ -142,6 +143,95 @@ async function createSdkClient(): Promise<AnthropicClient> {
         content: (response.content ?? []).flatMap(fromSdkBlock),
       };
     },
+    async stream(request, onText) {
+      const live = client as unknown as {
+        messages: {
+          create(body: Record<string, unknown>, options: { signal?: AbortSignal }): AsyncIterable<AnthropicStreamEvent>;
+        };
+      };
+      const events = await Promise.resolve(
+        live.messages.create(
+          {
+            model: request.model,
+            max_tokens: request.maxTokens,
+            stream: true,
+            ...(request.system ? { system: request.system } : {}),
+            messages: request.messages,
+            ...(request.tools && request.tools.length > 0 ? { tools: request.tools } : {}),
+            thinking: request.thinking,
+          },
+          { signal: request.signal },
+        ),
+      );
+      return collectAnthropic(events, onText);
+    },
+  };
+}
+
+interface AnthropicStreamEvent {
+  type?: string;
+  index?: number;
+  content_block?: { type?: string; text?: string; id?: string; name?: string; thinking?: string; data?: string };
+  delta?: { type?: string; text?: string; partial_json?: string; thinking?: string; signature?: string; stop_reason?: string };
+  message?: { usage?: { input_tokens?: number; output_tokens?: number; cache_creation_input_tokens?: number; cache_read_input_tokens?: number } };
+  usage?: { output_tokens?: number };
+}
+
+async function collectAnthropic(events: AsyncIterable<AnthropicStreamEvent>, onText: (delta: string) => void): Promise<AnthropicResult> {
+  const blocks: Array<AnthropicBlock & { json?: string }> = [];
+  let stopReason: string | undefined;
+  const usage: AnthropicUsage = {};
+  for await (const event of events) {
+    if (event.type === "message_start") {
+      usage.inputTokens = event.message?.usage?.input_tokens;
+      usage.cacheCreationInputTokens = event.message?.usage?.cache_creation_input_tokens;
+      usage.cacheReadInputTokens = event.message?.usage?.cache_read_input_tokens;
+      continue;
+    }
+    if (event.type === "content_block_start") {
+      const index = event.index ?? blocks.length;
+      const block = event.content_block;
+      if (block?.type === "text") blocks[index] = { type: "text", text: "" };
+      else if (block?.type === "tool_use") blocks[index] = { type: "tool_use", id: block.id ?? "", name: block.name ?? "", input: {}, json: "" };
+      else if (block?.type === "thinking") blocks[index] = { type: "thinking", thinking: "", signature: "" };
+      else if (block?.type === "redacted_thinking") blocks[index] = { type: "redacted_thinking", data: block.data ?? "" };
+      continue;
+    }
+    if (event.type === "content_block_delta") {
+      const block = blocks[event.index ?? 0];
+      const delta = event.delta;
+      if (!block || !delta) continue;
+      if (delta.type === "text_delta" && block.type === "text") {
+        block.text += delta.text ?? "";
+        if (delta.text) onText(delta.text);
+      } else if (delta.type === "input_json_delta" && block.type === "tool_use") {
+        block.json = `${block.json ?? ""}${delta.partial_json ?? ""}`;
+      } else if (delta.type === "thinking_delta" && block.type === "thinking") {
+        block.thinking += delta.thinking ?? "";
+      } else if (delta.type === "signature_delta" && block.type === "thinking") {
+        block.signature += delta.signature ?? "";
+      }
+      continue;
+    }
+    if (event.type === "message_delta") {
+      stopReason = event.delta?.stop_reason ?? stopReason;
+      if (event.usage?.output_tokens !== undefined) usage.outputTokens = event.usage.output_tokens;
+    }
+  }
+  return {
+    stopReason,
+    usage,
+    content: blocks.filter((block) => block !== undefined).map((block) => {
+      if (block.type !== "tool_use") return block;
+      let input: Record<string, unknown> = {};
+      try {
+        const parsed = JSON.parse(block.json ?? "{}") as unknown;
+        if (typeof parsed === "object" && parsed !== null && !Array.isArray(parsed)) input = parsed as Record<string, unknown>;
+      } catch {
+        input = {};
+      }
+      return { type: "tool_use" as const, id: block.id, name: block.name, input };
+    }),
   };
 }
 
@@ -232,7 +322,7 @@ export class AnthropicProvider implements Provider, TokenReporter {
     const start = Date.now();
     try {
       const client = this.client ?? (await this.sdk());
-      const raw = await client.create(request);
+      const raw = ctx.onText && client.stream ? await client.stream(request, ctx.onText) : await client.create(request);
       const response = fromResult(raw);
       this.total = addUsage(this.total, response.usage);
       const elapsed = Date.now() - start;

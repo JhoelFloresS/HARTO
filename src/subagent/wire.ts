@@ -16,7 +16,7 @@ export function registerSubagents(
   write: LineSink = consoleSink,
   subagents: SubagentRegistry = subagentRegistry,
 ): void {
-  subagents.register(new Research(provider, tools.subset("read_file"), write));
+  subagents.register(new Research(provider, tools.subset("read_file", "search"), write));
   for (const subagent of subagents.all()) {
     tools.register(new DelegateTool(subagent, write));
   }

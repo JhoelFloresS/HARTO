@@ -1,22 +1,23 @@
-import { realpathSync } from "node:fs";
+import { realpathSync, statSync } from "node:fs";
 import { createInterface } from "node:readline";
 import { pathToFileURL } from "node:url";
 
-import { join } from "node:path";
+import { join, resolve } from "node:path";
 
 import { Agent } from "./agent/agent.ts";
 import type { CommandContext } from "./commands.ts";
 import { debugEnabled, setDebugEnabled, snapshot } from "./debug/debug.ts";
 import { loadEnvFile } from "./env.ts";
-import { loadConfig } from "./mcp/config.ts";
+import { loadConfig, saveConfig, type ServerConfig } from "./mcp/config.ts";
 import { noteMcpProgress, type McpProgress, type McpProgressState } from "./mcp/progress.ts";
 import { registerMcp } from "./mcp/register.ts";
 import type { McpSession } from "./mcp/session.ts";
 import { SessionFiles } from "./memory/session-files.ts";
 import { summarizeSession } from "./memory/summarize.ts";
-import { setMemoryStore } from "./memory/store.ts";
+import { NoMemory, setMemoryStore } from "./memory/store.ts";
 import { consoleSink, type LineSink } from "./output.ts";
 import { baseSystemPrompt, loadAgentsContext } from "./prompt.ts";
+import { AllowList, readOnlyTools } from "./permission/policy.ts";
 import { expandMentions, listProjectEntries } from "./mention/mention.ts";
 import { detectProject, projectLabel, projectPrompt, resolveProject, unknownProject, type Project } from "./project/project.ts";
 import type { TokenReporter } from "./provider/provider.ts";
@@ -95,6 +96,7 @@ export async function startHarness(): Promise<void> {
   registerSubagents(provider, defaultRegistry, sink);
   const agent = new Agent(provider, system, defaultRegistry, sink);
   agent.maxTurns = 50;
+  agent.policy = new AllowList(readOnlyTools);
   onProviderChange((next) => {
     registerSubagents(next, defaultRegistry, agent.write);
   });
@@ -112,18 +114,106 @@ export async function startHarness(): Promise<void> {
     });
     agent.confirm = (prompt, detail) => screen!.requestApproval(prompt, detail);
   }
+  agent.onDelta = (delta) => {
+    if (screen) screen.stream(delta);
+    else process.stdout.write(delta);
+  };
 
-  const mcpAbort = new AbortController();
+  let mcpAbort = new AbortController();
   const mcpClients: McpSession[] = [];
+  const mcpStatus = new Map<string, string>();
   const mcpState: McpProgressState = { finished: 0, failed: 0 };
-  const mcpTask = connectMcp(mcpAbort.signal, mcpClients, (event) => {
+  const onMcp = (event: McpProgress) => {
+    if (event.phase === "connecting") mcpStatus.set(event.server, "conectando");
+    if (event.phase === "connected") mcpStatus.set(event.server, "conectado");
+    if (event.phase === "failed") mcpStatus.set(event.server, "falló");
     if (screen) {
       screen.noteMcp(event);
       return;
     }
     const line = noteMcpProgress(event, mcpState);
     if (line && !mcpAbort.signal.aborted) consoleSink(line);
-  });
+  };
+  let mcpTask = connectMcp(mcpAbort.signal, mcpClients, onMcp);
+
+  async function reloadMcp(): Promise<void> {
+    mcpAbort.abort();
+    await mcpTask;
+    for (const client of mcpClients) {
+      try {
+        await client.close();
+      } catch {
+        // A server that already exited still has to be dropped from the list.
+      }
+    }
+    mcpClients.length = 0;
+    defaultRegistry.drop((tool) => (tool as { mcp?: boolean }).mcp === true);
+    mcpStatus.clear();
+    mcpAbort = new AbortController();
+    mcpTask = connectMcp(mcpAbort.signal, mcpClients, onMcp);
+  }
+
+  async function relocate(dir: string): Promise<string> {
+    const resolved = resolve(process.cwd(), dir);
+    let root: string;
+    try {
+      if (!statSync(resolved).isDirectory()) throw new Error(`no es un directorio: ${resolved}`);
+      root = realpathSync(resolved);
+    } catch (err) {
+      if (err instanceof Error && err.message.startsWith("no es un directorio")) throw err;
+      const message = err instanceof Error ? err.message : String(err);
+      throw new Error(`no encuentro ${resolved}: ${message}`);
+    }
+    process.chdir(root);
+    loadEnvFile();
+    let opened;
+    try {
+      opened = detectProject(root) ?? unknownProject(root);
+    } catch {
+      opened = unknownProject(root);
+    }
+    let next = baseSystemPrompt + projectPrompt(opened) + loadAgentsContext();
+    if (sessions) {
+      await sessions.close().catch(() => {});
+      sessions = null;
+    }
+    try {
+      sessions = SessionFiles.open(".harto");
+      setMemoryStore(sessions);
+      next += await sessions.preamble();
+    } catch (err) {
+      setMemoryStore(new NoMemory());
+      const message = err instanceof Error ? err.message : String(err);
+      process.stderr.write(`memory: ${message} (continuing without persistent memory)\n`);
+    }
+    agent.system = next;
+    const shown = projectLabel(opened);
+    screen?.setProject(shown);
+    await reloadMcp();
+    return shown;
+  }
+
+  async function listMcp(): Promise<string> {
+    const config = await loadConfig(join(process.cwd(), "mcp.json"));
+    if (!config || config.servers.length === 0) return "no hay servidores MCP. /mcp add para agregar uno.";
+    return config.servers
+      .map((server) => {
+        const status = mcpStatus.get(server.name) ?? "configurado";
+        const where = server.transport === "http" ? (server.url ?? "") : [server.command, ...(server.args ?? [])].filter(Boolean).join(" ");
+        return `${server.name}  ${server.transport}  ${status}  ${where}`;
+      })
+      .join("\n");
+  }
+
+  async function addMcp(server: ServerConfig): Promise<void> {
+    const path = join(process.cwd(), "mcp.json");
+    const current = (await loadConfig(path)) ?? { servers: [] };
+    const servers = current.servers.filter((item) => item.name !== server.name);
+    servers.push(server);
+    await saveConfig(path, { servers });
+    await reloadMcp();
+  }
+
   onShutdown(async () => {
     mcpAbort.abort();
     await mcpTask;
@@ -137,22 +227,21 @@ export async function startHarness(): Promise<void> {
     }
   });
 
-  if (sessions) {
+  onShutdown(async () => {
     const memory = sessions;
-    onShutdown(async () => {
-      const history = agent.getMessages();
-      if (history.length > 0) {
-        const parsed = await summarizeSession(agent.provider, history);
-        await memory.save({
-          time: new Date(),
-          kind: "session-summary",
-          content: parsed.summary,
-          tags: parsed.tags,
-        });
-      }
-      await memory.close();
-    });
-  }
+    if (!memory) return;
+    const history = agent.getMessages();
+    if (history.length > 0) {
+      const parsed = await summarizeSession(agent.provider, history);
+      await memory.save({
+        time: new Date(),
+        kind: "session-summary",
+        content: parsed.summary,
+        tags: parsed.tags,
+      });
+    }
+    await memory.close();
+  });
   const ctx: CommandContext = {
     agent,
     providerName,
@@ -162,6 +251,10 @@ export async function startHarness(): Promise<void> {
         process.exit(0);
       });
     },
+    relocate,
+    listMcp,
+    addMcp,
+    ...(screen ? { ask: () => screen!.ask() } : {}),
   };
 
   try {

@@ -75,7 +75,7 @@ type McpProgress =
   | { phase: "done"; total: number };
 ```
 
-La línea de estado muestra el servidor en curso y un contador mientras `begin` no haya sido cerrado por `done`. Al terminar, la línea vuelve al uso de tokens. `/tools` marca las tools MCP con el sufijo `(mcp)`.
+La línea de estado muestra el servidor en curso y un contador mientras `begin` no haya sido cerrado por `done`. Al terminar, la línea vuelve al uso de tokens. `/tools` marca las tools MCP con el sufijo `(mcp)`. `/mcp` lista los servidores y `/mcp add` agrega uno a `mcp.json` y reconecta (capítulo 13). Al abrir otro proyecto se cierran los clientes viejos, se borran sus tools del registry y se carga el `mcp.json` de la carpeta nueva.
 
 ## Librería
 

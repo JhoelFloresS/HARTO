@@ -66,9 +66,10 @@ export interface OpenAIResult {
 
 export interface OpenAIClient {
   create(request: OpenAIRequest): Promise<OpenAIResult>;
+  stream?(request: OpenAIRequest, onText: (delta: string) => void): Promise<OpenAIResult>;
 }
 
-type OpenAICtor = new (options: { apiKey?: string }) => {
+type OpenAICtor = new (options: { apiKey?: string; baseURL?: string; defaultHeaders?: Record<string, string> }) => {
   chat: {
     completions: {
       create(
@@ -103,11 +104,16 @@ type OpenAICtor = new (options: { apiKey?: string }) => {
 /**
  * Loaded only when a real call is made. A static import would force every test
  * that touches this module to have the openai package installed.
+ * OpenRouter uses the same client with another base URL. The package stays imported here.
  */
-async function createSdkClient(): Promise<OpenAIClient> {
+export async function createChatClient(endpoint: {
+  apiKey?: string;
+  baseURL?: string;
+  defaultHeaders?: Record<string, string>;
+}): Promise<OpenAIClient> {
   const specifier = "openai";
   const loaded = (await import(specifier)) as { default: OpenAICtor };
-  const client = new loaded.default({ apiKey: process.env.OPENAI_API_KEY });
+  const client = new loaded.default(endpoint);
   return {
     async create(request) {
       const response = await client.chat.completions.create(
@@ -138,7 +144,79 @@ async function createSdkClient(): Promise<OpenAIClient> {
         usage,
       };
     },
+    async stream(request, onText) {
+      const live = client as unknown as {
+        chat: {
+          completions: {
+            create(body: Record<string, unknown>, options: { signal?: AbortSignal }): AsyncIterable<OpenAIStreamChunk>;
+          };
+        };
+      };
+      const events = await Promise.resolve(
+        live.chat.completions.create(
+          {
+            model: request.model,
+            max_completion_tokens: request.maxCompletionTokens,
+            stream: true,
+            stream_options: { include_usage: true },
+            messages: request.messages.map(toSdkMessage),
+            ...(request.tools && request.tools.length > 0 ? { tools: request.tools.map(toSdkTool) } : {}),
+          },
+          { signal: request.signal },
+        ),
+      );
+      return collectOpenAI(events, onText);
+    },
   };
+}
+
+function createSdkClient(): Promise<OpenAIClient> {
+  return createChatClient({ apiKey: process.env.OPENAI_API_KEY });
+}
+
+interface OpenAIStreamChunk {
+  choices?: Array<{
+    finish_reason?: string | null;
+    delta?: {
+      content?: string | null;
+      tool_calls?: Array<{ index?: number; id?: string; function?: { name?: string; arguments?: string } }>;
+    };
+  }>;
+  usage?: { prompt_tokens?: number; completion_tokens?: number; prompt_tokens_details?: { cached_tokens?: number } };
+}
+
+async function collectOpenAI(events: AsyncIterable<OpenAIStreamChunk>, onText: (delta: string) => void): Promise<OpenAIResult> {
+  let content = "";
+  let finishReason: string | undefined;
+  const calls = new Map<number, { id: string; name: string; arguments: string }>();
+  const usage: OpenAIUsage = {};
+  for await (const chunk of events) {
+    const choice = chunk.choices?.[0];
+    const delta = choice?.delta;
+    if (typeof delta?.content === "string" && delta.content !== "") {
+      content += delta.content;
+      onText(delta.content);
+    }
+    for (const call of delta?.tool_calls ?? []) {
+      const index = call.index ?? 0;
+      const current = calls.get(index) ?? { id: "", name: "", arguments: "" };
+      if (call.id) current.id = call.id;
+      if (call.function?.name) current.name += call.function.name;
+      if (call.function?.arguments) current.arguments += call.function.arguments;
+      calls.set(index, current);
+    }
+    if (choice?.finish_reason) finishReason = choice.finish_reason;
+    if (chunk.usage) {
+      usage.promptTokens = chunk.usage.prompt_tokens;
+      usage.completionTokens = chunk.usage.completion_tokens;
+      usage.cachedTokens = chunk.usage.prompt_tokens_details?.cached_tokens;
+    }
+  }
+  const toolCalls = [...calls.entries()]
+    .sort((a, b) => a[0] - b[0])
+    .map((entry) => entry[1]);
+  if (content === "" && toolCalls.length === 0 && !finishReason) return { empty: true, usage };
+  return { finishReason, content, toolCalls, usage };
 }
 
 function readContent(content: string | null | Array<{ type?: string; text?: string }> | undefined): string {
@@ -223,7 +301,6 @@ export class OpenAIProvider implements Provider, TokenReporter {
     // setModel or another send cannot tear it: that assignment does not yield.
     const model = this.modelName;
     const system = ctx.system ?? this.system;
-    const request = toRequest(model, system, this.maxTokens, messages, tools, ctx.signal);
     const reqId = recordp(
       "provider",
       "info",
@@ -233,8 +310,7 @@ export class OpenAIProvider implements Provider, TokenReporter {
     const start = Date.now();
     try {
       const client = this.client ?? (await this.sdk());
-      const raw = await client.create(request);
-      const response = fromResult(raw);
+      const response = await completeChat(client, model, system, this.maxTokens, messages, tools, ctx);
       this.total = addUsage(this.total, response.usage);
       const elapsed = Date.now() - start;
       recordpc(
@@ -257,6 +333,21 @@ export class OpenAIProvider implements Provider, TokenReporter {
     this.clientPromise ??= createSdkClient();
     return this.clientPromise;
   }
+}
+
+/** Chat Completions round trip. OpenRouter uses this with its own client. */
+export async function completeChat(
+  client: OpenAIClient,
+  model: string,
+  system: string,
+  maxTokens: number,
+  messages: Message[],
+  tools: ToolDef[],
+  ctx: SendContext = {},
+): Promise<Response> {
+  const request = toRequest(model, system, maxTokens, messages, tools, ctx.signal);
+  const raw = ctx.onText && client.stream ? await client.stream(request, ctx.onText) : await client.create(request);
+  return fromResult(raw);
 }
 
 function toRequest(

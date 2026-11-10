@@ -29,6 +29,7 @@ export async function runRepl(ctx: CommandContext, project = ""): Promise<void> 
   }
 
   let closed = false;
+  ctx.ask = () => ask();
 
   process.stdout.write(`${bannerAnsi(project)}\n`);
   rl.prompt();

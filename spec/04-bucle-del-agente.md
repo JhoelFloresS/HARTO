@@ -20,6 +20,8 @@ Paquete `src/agent/`. Un `Agent` es una conversación: provider, registry de too
 
 `send(prompt)` agrega un mensaje `user` con un bloque de texto y entra al loop. Devuelve el texto final del asistente, ya recortado. El agente no interpreta `@`. La UI, antes de llamar a `send`, adjunta el archivo o la carpeta de cada referencia (capítulo 13).
 
+Si `send` recibe `onText` y el adaptador puede streamear, cada delta de texto visible se entrega ahí y el loop no vuelve a imprimir el bloque entero. Un pensamiento no se streamea ni se imprime. Sin `onText`, o si el adaptador no streamea, el texto sale entero al cerrar la respuesta, como antes. El `Response` que entra al historial es siempre el mensaje completo.
+
 ## Una vuelta
 
 1. `compactor.compact(messages)`. Si lanza, se registra en debug (nivel error), se avisa por el sink y se sigue con el historial anterior. Si el largo cambió: evento debug con el transcript de antes y después; si `verbose`, también se imprime.

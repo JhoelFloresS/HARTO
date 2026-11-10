@@ -35,6 +35,13 @@ export class Registry {
     return out;
   }
 
+  /** Drops tools that match. Used to forget MCP tools when the project changes. */
+  drop(predicate: (tool: Tool) => boolean): void {
+    for (const [name, tool] of this.tools) {
+      if (predicate(tool)) this.tools.delete(name);
+    }
+  }
+
   /** Sorted by name so consecutive requests serialize the same tool list. */
   definitions(): ToolDef[] {
     return [...this.tools.keys()].sort().map((name) => this.tools.get(name)!.definition());

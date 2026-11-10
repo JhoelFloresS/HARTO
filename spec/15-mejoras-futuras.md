@@ -10,8 +10,8 @@ El capítulo 13 y el README se escribieron antes que varios extras. Esto es lo q
 
 | Mejora | Dónde se discute | Notas para harto |
 |---|---|---|
-| Streaming de tokens | `exercises/en/05-streaming-responses.md`, cap. 13 | Toca `Provider`, el loop y la UI a la vez. Los tool calls no se pueden despachar hasta tener el JSON completo. Diseñar un `Chunk` (`text delta`, inicio/fin de tool, usage) y un método aparte o una interfaz `Streamer`, sin romper `send` síncrono. Los tres providers, Gemini incluido, lo harían juntos |
-| Políticas de permiso | `how-to/en/add-a-permission-policy.md`, cap. 02 | La interfaz objetivo ya está en [08-permisos](08-permisos.md). Falta construirla |
+| Streaming de tokens | `exercises/en/05-streaming-responses.md`, cap. 13 | Hecho: `onText` en `send`, los tres adaptadores streamean, y sin callback se conserva el `send` completo |
+| Políticas de permiso | `how-to/en/add-a-permission-policy.md`, cap. 02 | Hecho el núcleo: `AllowList` en la raíz para `read_file`, `recall` y `search`. Siguen pendientes `AskOnce`, `PathScoped` y `AlwaysAllow` |
 | Caché de prompt explícita en Anthropic | cap. 17 | El capítulo muestra `cache_control` ephemeral en el system prompt. `anthropic.go` no lo envía. Los campos de usage ya existen. Encenderlo invalida al compactar y al cambiar tools o modelo |
 | Entrada multilínea | cap. 08 y 13 | Enter envía, y el newline tiene que ser una combinación que la terminal distinga (Alt-Enter o Ctrl-J). Shift-Enter no es fiable |
 | Persistir la conversación en curso | cap. 13 | `/save` y `/load` del array de mensajes. Distinto de la memoria de sesiones, que solo guarda el resumen |

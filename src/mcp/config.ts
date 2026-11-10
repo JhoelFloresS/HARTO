@@ -1,4 +1,4 @@
-import { readFile } from "node:fs/promises";
+import { readFile, writeFile } from "node:fs/promises";
 
 export interface ServerConfig {
   name: string;
@@ -58,4 +58,9 @@ export function expand(value: string): string {
 
 function isMissing(err: unknown): boolean {
   return typeof err === "object" && err !== null && "code" in err && (err as { code?: string }).code === "ENOENT";
+}
+
+/** Writes mcp.json. Callers pass the full server list, including the ones already there. */
+export async function saveConfig(path: string, config: McpConfig): Promise<void> {
+  await writeFile(path, `${JSON.stringify({ servers: config.servers }, null, 2)}\n`, "utf8");
 }
